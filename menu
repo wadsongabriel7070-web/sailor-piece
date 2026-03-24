@@ -1,0 +1,1092 @@
+-- Anxiee Scripts V2 - Auto Farm + Skills (FIXED v5 - Teleport de Longa Distância)
+
+local function RandomString(len)
+	local chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	local str = ""
+	for i = 1, len do
+		local rand = math.random(1, #chars)
+		str = str .. chars:sub(rand, rand)
+	end
+	return str
+end
+
+task.wait(math.random(100, 300) / 100)
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+
+local Player = Players.LocalPlayer
+
+-- HABILITAR CURSOR DO MOUSE
+UserInputService.MouseIconEnabled = true
+UserInputService.MouseIcon = ""
+
+-- Variáveis
+local _FARM = false
+local _CACHE = {}
+local _GUI_MINIMIZED = false
+local _MOBLIST_EXPANDED = false
+local _CURRENT_PAGE = "AutoFarm"
+
+-- Auto Farm Variables
+local _FARM_TARGET = nil
+local _FARM_INDEX = 1
+local _FARM_LIST = {}
+local _SELECTED_MOBS = {}
+local _CURRENT_TARGET_ROOT = nil
+local _CURRENT_TARGET_MODEL = nil
+local _FARM_POSITION = nil
+
+-- Anti-Push Variables
+local _ANTI_PUSH_ACTIVE = false
+local _BODY_VELOCITY = nil
+local _BODY_GYRO = nil
+
+-- Auto Attack Variables
+local _AUTO_ATTACK_ACTIVE = false
+local _LAST_CLICK_TIME = 0
+local _CLICK_DELAY = 0.15
+local _ATTACK_REMOTES = {}
+
+-- Skills Variables
+local _EQUIPPED_SKILLS = {}
+local _SKILL_BUTTONS = {}
+
+-- Cores
+local C = {
+	BG = Color3.fromRGB(18, 18, 26),
+	SF = Color3.fromRGB(26, 26, 38),
+	BR = Color3.fromRGB(50, 50, 72),
+	AC = Color3.fromRGB(99, 102, 241),
+	TP = Color3.fromRGB(240, 240, 255),
+	TS = Color3.fromRGB(140, 140, 170),
+	OFF = Color3.fromRGB(55, 55, 75),
+	ON = Color3.fromRGB(99, 102, 241),
+	OK = Color3.fromRGB(34, 197, 94),
+}
+
+local TW = TweenInfo.new(0.18, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+
+local function FindR(mdl)
+	return mdl:FindFirstChild("FakeHRP") or mdl:FindFirstChild("HumanoidRootPart") or mdl:FindFirstChild("Head")
+end
+
+-- =====================================================
+-- BACKPACK: sempre pega a referência atual
+-- =====================================================
+local function GetBackpack()
+	return Player:FindFirstChild("Backpack")
+end
+
+-- Anti-Push System
+local function EnableAntiPush(char)
+	if not char then return end
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+
+	if _BODY_VELOCITY then pcall(function() _BODY_VELOCITY:Destroy() end) end
+	if _BODY_GYRO then pcall(function() _BODY_GYRO:Destroy() end) end
+
+	_BODY_VELOCITY = Instance.new("BodyVelocity")
+	_BODY_VELOCITY.Name = RandomString(10)
+	_BODY_VELOCITY.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+	_BODY_VELOCITY.Velocity = Vector3.new(0, 0, 0)
+	_BODY_VELOCITY.Parent = hrp
+
+	_BODY_GYRO = Instance.new("BodyGyro")
+	_BODY_GYRO.Name = RandomString(10)
+	_BODY_GYRO.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+	_BODY_GYRO.P = 10000
+	_BODY_GYRO.D = 500
+	_BODY_GYRO.Parent = hrp
+
+	_ANTI_PUSH_ACTIVE = true
+end
+
+local function DisableAntiPush()
+	if _BODY_VELOCITY then pcall(function() _BODY_VELOCITY:Destroy() end); _BODY_VELOCITY = nil end
+	if _BODY_GYRO then pcall(function() _BODY_GYRO:Destroy() end); _BODY_GYRO = nil end
+	_ANTI_PUSH_ACTIVE = false
+	_FARM_POSITION = nil
+end
+
+-- =====================================================
+-- TELEPORT DE LONGA DISTÂNCIA - CORRIGIDO
+-- Agora teleporta de QUALQUER distância, não importa onde o player esteja
+-- =====================================================
+local function TeleportToTarget(target)
+	local char = Player.Character
+	if not char then return false end
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if not hrp or not target then return false end
+
+	-- Calcula posição atrás do alvo
+	local offset = target.CFrame.LookVector * -5
+	local behindPos = target.Position + offset
+	local targetCFrame = CFrame.new(behindPos, target.Position)
+	
+	-- TELEPORT FORÇADO - Remove qualquer física que possa interferir
+	hrp.CFrame = targetCFrame
+	hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+	hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+	
+	-- Atualiza posição de farm
+	_FARM_POSITION = targetCFrame
+	
+	if _BODY_GYRO then 
+		_BODY_GYRO.CFrame = targetCFrame 
+	end
+	
+	return true
+end
+
+-- Auto Attack
+local function CacheAttackRemotes()
+	if #_ATTACK_REMOTES > 0 then return end
+	pcall(function()
+		for _, v in pairs(ReplicatedStorage:GetDescendants()) do
+			if v:IsA("RemoteEvent") then
+				local name = v.Name:lower()
+				if name:find("punch") or name:find("attack") or name:find("hit") or
+				   name:find("damage") or name:find("combat") or name:find("strike") or
+				   name:find("swing") or name:find("slash") or name:find("fire") then
+					table.insert(_ATTACK_REMOTES, v)
+				end
+			end
+		end
+	end)
+end
+
+local function SimulateClick()
+	local currentTime = tick()
+	if currentTime - _LAST_CLICK_TIME < _CLICK_DELAY then return end
+	_LAST_CLICK_TIME = currentTime
+	if #_ATTACK_REMOTES > 0 then
+		for _, remote in ipairs(_ATTACK_REMOTES) do
+			pcall(function() remote:FireServer() end)
+		end
+	else
+		CacheAttackRemotes()
+	end
+end
+
+-- =====================================================
+-- SISTEMA DE BUSCA DE MOBS/BOSSES MELHORADO
+-- Procura por nome direto E por containers de TimedBossSpawn
+-- =====================================================
+local function FindMobByName(name)
+	-- Primeiro tenta encontrar diretamente no workspace
+	for _, obj in pairs(workspace:GetChildren()) do
+		if obj:IsA("Model") and obj.Name == name then
+			local hum = obj:FindFirstChildOfClass("Humanoid")
+			if hum and hum.Health > 0 then
+				local root = FindR(obj)
+				if root then return obj, root, hum end
+			end
+		end
+	end
+	
+	-- Busca em todos os descendentes
+	for _, obj in pairs(workspace:GetDescendants()) do
+		if obj:IsA("Model") and obj.Name == name then
+			local hum = obj:FindFirstChildOfClass("Humanoid")
+			if hum and hum.Health > 0 then
+				local root = FindR(obj)
+				if root then return obj, root, hum end
+			end
+		end
+	end
+	
+	-- Busca específica para TimedBossSpawn containers
+	local containerName = "TimedBossSpawn_" .. name .. "_Container"
+	local container = workspace:FindFirstChild(containerName)
+	if container then
+		local bossModel = container:FindFirstChild("TimedBossSpawn_" .. name)
+		if bossModel and bossModel:IsA("Model") then
+			local hum = bossModel:FindFirstChildOfClass("Humanoid")
+			if hum and hum.Health > 0 then
+				local root = FindR(bossModel)
+				if root then return bossModel, root, hum end
+			end
+		end
+	end
+	
+	-- Busca alternativa para bosses sem "Boss" no nome do container
+	-- Ex: TimedBossSpawn_Yamato_Container para YamatoBoss
+	if name:find("Boss") then
+		local baseName = name:gsub("Boss", "")
+		local altContainerName = "TimedBossSpawn_" .. baseName .. "_Container"
+		local altContainer = workspace:FindFirstChild(altContainerName)
+		if altContainer then
+			local bossModel = altContainer:FindFirstChild("TimedBossSpawn_" .. name)
+			if bossModel and bossModel:IsA("Model") then
+				local hum = bossModel:FindFirstChildOfClass("Humanoid")
+				if hum and hum.Health > 0 then
+					local root = FindR(bossModel)
+					if root then return bossModel, root, hum end
+				end
+			end
+		end
+	end
+	
+	return nil, nil, nil
+end
+
+-- =====================================================
+-- SKILLS SYSTEM
+-- =====================================================
+local function EquipTool(toolName)
+	local char = Player.Character
+	if not char then return false end
+	local humanoid = char:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return false end
+
+	-- Já está equipada no char
+	local alreadyOn = char:FindFirstChild(toolName)
+	if alreadyOn and alreadyOn:IsA("Tool") then return true end
+
+	-- Procura na backpack atual
+	local bp = GetBackpack()
+	if bp then
+		local tool = bp:FindFirstChild(toolName)
+		if tool and tool:IsA("Tool") then
+			humanoid:EquipTool(tool)
+			return true
+		end
+	end
+
+	return false
+end
+
+local function UnequipTool(toolName)
+	local char = Player.Character
+	if not char then return false end
+	local equippedTool = char:FindFirstChild(toolName)
+	if equippedTool and equippedTool:IsA("Tool") then
+		local bp = GetBackpack()
+		if bp then
+			equippedTool.Parent = bp
+		end
+		return true
+	end
+	return false
+end
+
+-- GUI
+local SG = Instance.new("ScreenGui")
+SG.Name = RandomString(12)
+SG.ResetOnSpawn = false
+SG.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+SG.DisplayOrder = math.random(5000, 8000)
+SG.IgnoreGuiInset = true
+
+local parent_success = pcall(function() SG.Parent = game:GetService("CoreGui") end)
+if not parent_success then SG.Parent = Player:WaitForChild("PlayerGui") end
+
+local MF = Instance.new("Frame")
+MF.Name = "MainFrame"
+MF.Size = UDim2.new(0, 340, 0, 200)
+MF.Position = UDim2.new(0.5, -170, 0.5, -100)
+MF.BackgroundColor3 = C.BG
+MF.BorderSizePixel = 0
+MF.Active = true
+MF.Draggable = true
+MF.Parent = SG
+Instance.new("UICorner", MF).CornerRadius = UDim.new(0, 16)
+
+local ST = Instance.new("UIStroke")
+ST.Color = C.BR
+ST.Thickness = 1.5
+ST.Parent = MF
+
+local HD = Instance.new("Frame")
+HD.Size = UDim2.new(1, 0, 0, 40)
+HD.BackgroundColor3 = C.SF
+HD.BorderSizePixel = 0
+HD.Parent = MF
+Instance.new("UICorner", HD).CornerRadius = UDim.new(0, 16)
+
+local HF = Instance.new("Frame")
+HF.Size = UDim2.new(1, 0, 0, 16)
+HF.Position = UDim2.new(0, 0, 1, -16)
+HF.BackgroundColor3 = C.BG
+HF.BorderSizePixel = 0
+HF.Parent = HD
+
+local TL = Instance.new("TextLabel")
+TL.Size = UDim2.new(1, -80, 0, 18)
+TL.Position = UDim2.new(0, 15, 0, 5)
+TL.BackgroundTransparency = 1
+TL.Text = "⚡ Anxiee Scripts"
+TL.TextColor3 = C.TP
+TL.TextSize = 14
+TL.Font = Enum.Font.GothamBold
+TL.TextXAlignment = Enum.TextXAlignment.Left
+TL.Parent = HD
+
+local ML = Instance.new("TextLabel")
+ML.Size = UDim2.new(1, -80, 0, 12)
+ML.Position = UDim2.new(0, 15, 0, 23)
+ML.BackgroundTransparency = 1
+ML.Text = "🟢 Active"
+ML.TextColor3 = C.OK
+ML.TextSize = 9
+ML.Font = Enum.Font.Gotham
+ML.TextXAlignment = Enum.TextXAlignment.Left
+ML.Parent = HD
+
+local MB = Instance.new("TextButton")
+MB.Size = UDim2.new(0, 28, 0, 28)
+MB.Position = UDim2.new(1, -68, 0.5, -14)
+MB.BackgroundColor3 = Color3.fromRGB(100, 100, 150)
+MB.Text = "_"
+MB.TextColor3 = C.TP
+MB.TextSize = 18
+MB.Font = Enum.Font.GothamBold
+MB.Parent = HD
+Instance.new("UICorner", MB).CornerRadius = UDim.new(0, 8)
+
+local CB = Instance.new("TextButton")
+CB.Size = UDim2.new(0, 28, 0, 28)
+CB.Position = UDim2.new(1, -34, 0.5, -14)
+CB.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+CB.Text = "X"
+CB.TextColor3 = C.TP
+CB.TextSize = 12
+CB.Font = Enum.Font.GothamBold
+CB.Parent = HD
+Instance.new("UICorner", CB).CornerRadius = UDim.new(0, 8)
+
+local TabContainer = Instance.new("Frame")
+TabContainer.Size = UDim2.new(1, -20, 0, 35)
+TabContainer.Position = UDim2.new(0, 10, 0, 50)
+TabContainer.BackgroundTransparency = 1
+TabContainer.Parent = MF
+
+local TabLayout = Instance.new("UIListLayout")
+TabLayout.FillDirection = Enum.FillDirection.Horizontal
+TabLayout.Padding = UDim.new(0, 8)
+TabLayout.Parent = TabContainer
+
+local function CreateTab(name, icon)
+	local tab = Instance.new("TextButton")
+	tab.Size = UDim2.new(0, 150, 1, 0)
+	tab.BackgroundColor3 = C.SF
+	tab.BorderSizePixel = 0
+	tab.Text = ""
+	tab.Parent = TabContainer
+	Instance.new("UICorner", tab).CornerRadius = UDim.new(0, 8)
+
+	local tabStroke = Instance.new("UIStroke")
+	tabStroke.Color = C.BR
+	tabStroke.Thickness = 1
+	tabStroke.Parent = tab
+
+	local tabIcon = Instance.new("TextLabel")
+	tabIcon.Size = UDim2.new(0, 20, 0, 20)
+	tabIcon.Position = UDim2.new(0, 10, 0.5, -10)
+	tabIcon.BackgroundTransparency = 1
+	tabIcon.Text = icon
+	tabIcon.TextSize = 14
+	tabIcon.Font = Enum.Font.GothamBold
+	tabIcon.TextColor3 = C.TS
+	tabIcon.Parent = tab
+
+	local tabLabel = Instance.new("TextLabel")
+	tabLabel.Size = UDim2.new(1, -40, 1, 0)
+	tabLabel.Position = UDim2.new(0, 35, 0, 0)
+	tabLabel.BackgroundTransparency = 1
+	tabLabel.Text = name
+	tabLabel.TextColor3 = C.TS
+	tabLabel.TextSize = 12
+	tabLabel.Font = Enum.Font.GothamBold
+	tabLabel.TextXAlignment = Enum.TextXAlignment.Left
+	tabLabel.Parent = tab
+
+	return tab, tabStroke, tabIcon, tabLabel
+end
+
+local AutoFarmTab, AutoFarmStroke, AutoFarmIcon, AutoFarmLabel = CreateTab("Auto Farm", "⚡")
+local SkillsTab, SkillsStroke, SkillsIcon, SkillsLabel = CreateTab("Skills", "⚔️")
+
+local ContentContainer = Instance.new("Frame")
+ContentContainer.Size = UDim2.new(1, -20, 1, -105)
+ContentContainer.Position = UDim2.new(0, 10, 0, 95)
+ContentContainer.BackgroundTransparency = 1
+ContentContainer.Parent = MF
+
+-- ==================== AUTO FARM PAGE ====================
+local AutoFarmPage = Instance.new("Frame")
+AutoFarmPage.Name = "AutoFarmPage"
+AutoFarmPage.Size = UDim2.new(1, 0, 1, 0)
+AutoFarmPage.BackgroundTransparency = 1
+AutoFarmPage.Visible = true
+AutoFarmPage.Parent = ContentContainer
+
+local AutoFarmLayout = Instance.new("UIListLayout")
+AutoFarmLayout.Padding = UDim.new(0, 10)
+AutoFarmLayout.Parent = AutoFarmPage
+
+local FarmCard = Instance.new("Frame")
+FarmCard.Size = UDim2.new(1, 0, 0, 55)
+FarmCard.BackgroundColor3 = C.SF
+FarmCard.BorderSizePixel = 0
+FarmCard.Parent = AutoFarmPage
+Instance.new("UICorner", FarmCard).CornerRadius = UDim.new(0, 12)
+
+local FarmStroke = Instance.new("UIStroke")
+FarmStroke.Color = C.BR
+FarmStroke.Thickness = 1
+FarmStroke.Parent = FarmCard
+
+local FarmIcon = Instance.new("TextLabel")
+FarmIcon.Size = UDim2.new(0, 35, 0, 35)
+FarmIcon.Position = UDim2.new(0, 8, 0.5, -17.5)
+FarmIcon.BackgroundColor3 = Color3.fromRGB(32, 32, 48)
+FarmIcon.Text = "⚡"
+FarmIcon.TextSize = 16
+FarmIcon.Font = Enum.Font.GothamBold
+FarmIcon.TextColor3 = Color3.fromRGB(34, 197, 94)
+FarmIcon.BorderSizePixel = 0
+FarmIcon.Parent = FarmCard
+Instance.new("UICorner", FarmIcon).CornerRadius = UDim.new(0, 10)
+
+local FarmTitle = Instance.new("TextLabel")
+FarmTitle.Size = UDim2.new(1, -160, 0, 18)
+FarmTitle.Position = UDim2.new(0, 50, 0, 8)
+FarmTitle.BackgroundTransparency = 1
+FarmTitle.Text = "Auto Farm"
+FarmTitle.TextColor3 = C.TP
+FarmTitle.TextSize = 13
+FarmTitle.Font = Enum.Font.GothamBold
+FarmTitle.TextXAlignment = Enum.TextXAlignment.Left
+FarmTitle.Parent = FarmCard
+
+local FarmSubtitle = Instance.new("TextLabel")
+FarmSubtitle.Size = UDim2.new(1, -160, 0, 15)
+FarmSubtitle.Position = UDim2.new(0, 50, 0, 30)
+FarmSubtitle.BackgroundTransparency = 1
+FarmSubtitle.Text = "Desativado"
+FarmSubtitle.TextColor3 = C.TS
+FarmSubtitle.TextSize = 11
+FarmSubtitle.Font = Enum.Font.Gotham
+FarmSubtitle.TextXAlignment = Enum.TextXAlignment.Left
+FarmSubtitle.Parent = FarmCard
+
+local ExpandBtn = Instance.new("TextButton")
+ExpandBtn.Size = UDim2.new(0, 35, 0, 35)
+ExpandBtn.Position = UDim2.new(1, -100, 0.5, -17.5)
+ExpandBtn.BackgroundColor3 = Color3.fromRGB(70, 70, 100)
+ExpandBtn.Text = ""
+ExpandBtn.BorderSizePixel = 0
+ExpandBtn.Parent = FarmCard
+Instance.new("UICorner", ExpandBtn).CornerRadius = UDim.new(0, 8)
+
+local ExpandIcon = Instance.new("TextLabel")
+ExpandIcon.Size = UDim2.new(1, 0, 1, 0)
+ExpandIcon.BackgroundTransparency = 1
+ExpandIcon.Text = "📋"
+ExpandIcon.TextSize = 16
+ExpandIcon.Font = Enum.Font.GothamBold
+ExpandIcon.TextColor3 = C.TP
+ExpandIcon.Parent = ExpandBtn
+
+local ExpandArrow = Instance.new("TextLabel")
+ExpandArrow.Size = UDim2.new(0, 12, 0, 12)
+ExpandArrow.Position = UDim2.new(1, -10, 1, -10)
+ExpandArrow.BackgroundTransparency = 1
+ExpandArrow.Text = "▼"
+ExpandArrow.TextSize = 8
+ExpandArrow.Font = Enum.Font.GothamBold
+ExpandArrow.TextColor3 = C.AC
+ExpandArrow.Parent = ExpandBtn
+
+local ToggleBg = Instance.new("Frame")
+ToggleBg.Size = UDim2.new(0, 48, 0, 26)
+ToggleBg.Position = UDim2.new(1, -56, 0.5, -13)
+ToggleBg.BackgroundColor3 = C.OFF
+ToggleBg.BorderSizePixel = 0
+ToggleBg.Parent = FarmCard
+Instance.new("UICorner", ToggleBg).CornerRadius = UDim.new(1, 0)
+
+local ToggleKnob = Instance.new("Frame")
+ToggleKnob.Size = UDim2.new(0, 20, 0, 20)
+ToggleKnob.Position = UDim2.new(0, 3, 0.5, -10)
+ToggleKnob.BackgroundColor3 = Color3.fromRGB(200, 200, 220)
+ToggleKnob.BorderSizePixel = 0
+ToggleKnob.Parent = ToggleBg
+Instance.new("UICorner", ToggleKnob).CornerRadius = UDim.new(1, 0)
+
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Size = UDim2.new(0, 48, 0, 26)
+ToggleBtn.Position = UDim2.new(1, -56, 0.5, -13)
+ToggleBtn.BackgroundTransparency = 1
+ToggleBtn.Text = ""
+ToggleBtn.Parent = FarmCard
+
+-- =====================================================
+-- LISTA DE MOBS E BOSSES ATUALIZADA
+-- Inclui todos os novos bosses TimedBossSpawn
+-- =====================================================
+local FARM_MOBS = {
+	-- Mobs normais
+	{name = "Thief1", isBoss = false}, {name = "Thief2", isBoss = false}, {name = "Thief3", isBoss = false},
+	{name = "Thief4", isBoss = false}, {name = "Thief5", isBoss = false}, {name = "Monkey1", isBoss = false},
+	{name = "Monkey2", isBoss = false}, {name = "Monkey3", isBoss = false}, {name = "Monkey4", isBoss = false},
+	{name = "Monkey5", isBoss = false}, {name = "DesertBandit1", isBoss = false}, {name = "DesertBandit2", isBoss = false},
+	{name = "DesertBandit3", isBoss = false}, {name = "DesertBandit4", isBoss = false}, {name = "DesertBandit5", isBoss = false},
+	{name = "FrostRogue1", isBoss = false}, {name = "FrostRogue2", isBoss = false}, {name = "FrostRogue3", isBoss = false},
+	{name = "FrostRogue4", isBoss = false}, {name = "FrostRogue5", isBoss = false}, {name = "Sorcerer1", isBoss = false},
+	{name = "Sorcerer2", isBoss = false}, {name = "Sorcerer3", isBoss = false}, {name = "Sorcerer4", isBoss = false},
+	{name = "Sorcerer5", isBoss = false}, {name = "StrongSorcerer1", isBoss = false}, {name = "StrongSorcerer2", isBoss = false},
+	{name = "StrongSorcerer3", isBoss = false}, {name = "StrongSorcerer4", isBoss = false}, {name = "StrongSorcerer5", isBoss = false},
+	{name = "Swordsman1", isBoss = false}, {name = "Swordsman2", isBoss = false}, {name = "Swordsman3", isBoss = false},
+	{name = "Swordsman4", isBoss = false}, {name = "Swordsman5", isBoss = false}, {name = "Slime1", isBoss = false},
+	{name = "Slime2", isBoss = false}, {name = "Slime3", isBoss = false}, {name = "Slime4", isBoss = false},
+	{name = "Slime5", isBoss = false}, {name = "Curse1", isBoss = false}, {name = "Curse2", isBoss = false},
+	{name = "Curse3", isBoss = false}, {name = "Curse4", isBoss = false}, {name = "Curse5", isBoss = false},
+	{name = "Hollow1", isBoss = false}, {name = "Hollow2", isBoss = false}, {name = "Hollow3", isBoss = false},
+	{name = "Hollow4", isBoss = false}, {name = "Hollow5", isBoss = false}, {name = "AcademyTeacher1", isBoss = false},
+	{name = "AcademyTeacher2", isBoss = false}, {name = "AcademyTeacher3", isBoss = false}, {name = "AcademyTeacher4", isBoss = false},
+	{name = "AcademyTeacher5", isBoss = false}, {name = "PandaMiniBoss", isBoss = false},
+	
+	-- Bosses antigos
+	{name = "ThiefBoss", isBoss = true}, 
+	{name = "MonkeyBoss", isBoss = true}, 
+	{name = "DesertBoss", isBoss = true},
+	{name = "SnowBoss", isBoss = true}, 
+	{name = "StrongestinHistoryBoss_Normal", isBoss = true},
+	
+	-- Novos bosses TimedBossSpawn
+	{name = "AizenBoss", isBoss = true},
+	{name = "SukunaBoss", isBoss = true},
+	{name = "YujiBoss", isBoss = true},
+	{name = "AlucardBoss", isBoss = true},
+	{name = "JinwooBoss", isBoss = true},
+	{name = "GojoBoss", isBoss = true},
+	{name = "RagnaBoss", isBoss = true},
+	{name = "YamatoBoss", isBoss = true},
+	{name = "MadokaBoss", isBoss = true},
+}
+
+local MobSection = Instance.new("Frame")
+MobSection.Name = "MobListSection"
+MobSection.Size = UDim2.new(1, 0, 0, 0)
+MobSection.BackgroundColor3 = C.SF
+MobSection.BorderSizePixel = 0
+MobSection.Visible = false
+MobSection.ClipsDescendants = true
+MobSection.Parent = AutoFarmPage
+Instance.new("UICorner", MobSection).CornerRadius = UDim.new(0, 12)
+
+local MobSectionStroke = Instance.new("UIStroke")
+MobSectionStroke.Color = C.BR
+MobSectionStroke.Thickness = 1
+MobSectionStroke.Parent = MobSection
+
+local MobHeader = Instance.new("TextLabel")
+MobHeader.Size = UDim2.new(1, -20, 0, 25)
+MobHeader.Position = UDim2.new(0, 10, 0, 8)
+MobHeader.BackgroundTransparency = 1
+MobHeader.Text = "📋 Select Mobs/Bosses to Farm"
+MobHeader.TextColor3 = C.TP
+MobHeader.TextSize = 12
+MobHeader.Font = Enum.Font.GothamBold
+MobHeader.TextXAlignment = Enum.TextXAlignment.Left
+MobHeader.Parent = MobSection
+
+local MobScroll = Instance.new("ScrollingFrame")
+MobScroll.Size = UDim2.new(1, -10, 1, -40)
+MobScroll.Position = UDim2.new(0, 5, 0, 35)
+MobScroll.BackgroundTransparency = 1
+MobScroll.BorderSizePixel = 0
+MobScroll.ScrollBarThickness = 4
+MobScroll.ScrollBarImageColor3 = C.AC
+MobScroll.Parent = MobSection
+
+local MobLayout = Instance.new("UIListLayout")
+MobLayout.Padding = UDim.new(0, 4)
+MobLayout.Parent = MobScroll
+
+local function CreateMobButton(mobData)
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(1, -8, 0, 28)
+	btn.BackgroundColor3 = C.SF
+	btn.BorderSizePixel = 0
+	btn.Text = ""
+	btn.Parent = MobScroll
+	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+
+	local bs = Instance.new("UIStroke")
+	bs.Color = C.BR
+	bs.Thickness = 1
+	bs.Parent = btn
+
+	local ico = Instance.new("TextLabel")
+	ico.Size = UDim2.new(0, 20, 0, 20)
+	ico.Position = UDim2.new(0, 5, 0.5, -10)
+	ico.BackgroundTransparency = 1
+	ico.Text = mobData.isBoss and "👑" or "⚔️"
+	ico.TextSize = 12
+	ico.Font = Enum.Font.GothamBold
+	ico.Parent = btn
+
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.new(1, -55, 1, 0)
+	lbl.Position = UDim2.new(0, 28, 0, 0)
+	lbl.BackgroundTransparency = 1
+	lbl.Text = mobData.name
+	lbl.TextColor3 = C.TP
+	lbl.TextSize = 10
+	lbl.Font = Enum.Font.Gotham
+	lbl.TextXAlignment = Enum.TextXAlignment.Left
+	lbl.Parent = btn
+
+	local chk = Instance.new("Frame")
+	chk.Size = UDim2.new(0, 16, 0, 16)
+	chk.Position = UDim2.new(1, -22, 0.5, -8)
+	chk.BackgroundColor3 = C.OFF
+	chk.BorderSizePixel = 0
+	chk.Parent = btn
+	Instance.new("UICorner", chk).CornerRadius = UDim.new(0, 4)
+
+	local chkMark = Instance.new("TextLabel")
+	chkMark.Size = UDim2.new(1, 0, 1, 0)
+	chkMark.BackgroundTransparency = 1
+	chkMark.Text = "✓"
+	chkMark.TextColor3 = C.TP
+	chkMark.TextSize = 12
+	chkMark.Font = Enum.Font.GothamBold
+	chkMark.Visible = false
+	chkMark.Parent = chk
+
+	btn.MouseButton1Click:Connect(function()
+		if _SELECTED_MOBS[mobData.name] then
+			_SELECTED_MOBS[mobData.name] = nil
+			chk.BackgroundColor3 = C.OFF
+			chkMark.Visible = false
+			bs.Color = C.BR
+		else
+			_SELECTED_MOBS[mobData.name] = true
+			chk.BackgroundColor3 = C.ON
+			chkMark.Visible = true
+			bs.Color = C.AC
+		end
+		_FARM_LIST = {}
+		for _, m in ipairs(FARM_MOBS) do
+			if _SELECTED_MOBS[m.name] then table.insert(_FARM_LIST, m) end
+		end
+		_FARM_INDEX = 1
+	end)
+end
+
+for _, mobData in ipairs(FARM_MOBS) do
+	CreateMobButton(mobData)
+end
+
+task.spawn(function()
+	task.wait(0.1)
+	MobScroll.CanvasSize = UDim2.new(0, 0, 0, MobLayout.AbsoluteContentSize.Y + 10)
+	MobLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+		MobScroll.CanvasSize = UDim2.new(0, 0, 0, MobLayout.AbsoluteContentSize.Y + 10)
+	end)
+end)
+
+-- ==================== SKILLS PAGE ====================
+local SkillsPage = Instance.new("Frame")
+SkillsPage.Name = "SkillsPage"
+SkillsPage.Size = UDim2.new(1, 0, 1, 0)
+SkillsPage.BackgroundTransparency = 1
+SkillsPage.Visible = false
+SkillsPage.Parent = ContentContainer
+
+local SkillsScroll = Instance.new("ScrollingFrame")
+SkillsScroll.Size = UDim2.new(1, 0, 1, 0)
+SkillsScroll.BackgroundTransparency = 1
+SkillsScroll.BorderSizePixel = 0
+SkillsScroll.ScrollBarThickness = 4
+SkillsScroll.ScrollBarImageColor3 = C.AC
+SkillsScroll.Parent = SkillsPage
+
+local SkillsLayout = Instance.new("UIListLayout")
+SkillsLayout.Padding = UDim.new(0, 6)
+SkillsLayout.Parent = SkillsScroll
+
+local function CreateSkillButton(toolName, index)
+	if _SKILL_BUTTONS[toolName] then return end
+
+	local skillCard = Instance.new("Frame")
+	skillCard.Size = UDim2.new(1, 0, 0, 45)
+	skillCard.BackgroundColor3 = C.SF
+	skillCard.BorderSizePixel = 0
+	skillCard.Parent = SkillsScroll
+	Instance.new("UICorner", skillCard).CornerRadius = UDim.new(0, 8)
+
+	local skillStroke = Instance.new("UIStroke")
+	skillStroke.Color = C.BR
+	skillStroke.Thickness = 1
+	skillStroke.Parent = skillCard
+
+	local keyLabel = Instance.new("TextLabel")
+	keyLabel.Size = UDim2.new(0, 30, 0, 30)
+	keyLabel.Position = UDim2.new(0, 8, 0.5, -15)
+	keyLabel.BackgroundColor3 = Color3.fromRGB(32, 32, 48)
+	keyLabel.Text = tostring(index)
+	keyLabel.TextColor3 = C.AC
+	keyLabel.TextSize = 14
+	keyLabel.Font = Enum.Font.GothamBold
+	keyLabel.BorderSizePixel = 0
+	keyLabel.Parent = skillCard
+	Instance.new("UICorner", keyLabel).CornerRadius = UDim.new(0, 6)
+
+	local toolLabel = Instance.new("TextLabel")
+	toolLabel.Size = UDim2.new(1, -110, 1, 0)
+	toolLabel.Position = UDim2.new(0, 45, 0, 0)
+	toolLabel.BackgroundTransparency = 1
+	toolLabel.Text = toolName
+	toolLabel.TextColor3 = C.TP
+	toolLabel.TextSize = 12
+	toolLabel.Font = Enum.Font.GothamBold
+	toolLabel.TextXAlignment = Enum.TextXAlignment.Left
+	toolLabel.Parent = skillCard
+
+	local skillToggleBg = Instance.new("Frame")
+	skillToggleBg.Size = UDim2.new(0, 45, 0, 24)
+	skillToggleBg.Position = UDim2.new(1, -52, 0.5, -12)
+	skillToggleBg.BackgroundColor3 = C.OFF
+	skillToggleBg.BorderSizePixel = 0
+	skillToggleBg.Parent = skillCard
+	Instance.new("UICorner", skillToggleBg).CornerRadius = UDim.new(1, 0)
+
+	local skillToggleKnob = Instance.new("Frame")
+	skillToggleKnob.Size = UDim2.new(0, 18, 0, 18)
+	skillToggleKnob.Position = UDim2.new(0, 3, 0.5, -9)
+	skillToggleKnob.BackgroundColor3 = Color3.fromRGB(200, 200, 220)
+	skillToggleKnob.BorderSizePixel = 0
+	skillToggleKnob.Parent = skillToggleBg
+	Instance.new("UICorner", skillToggleKnob).CornerRadius = UDim.new(1, 0)
+
+	local skillToggleBtn = Instance.new("TextButton")
+	skillToggleBtn.Size = UDim2.new(1, 0, 1, 0)
+	skillToggleBtn.BackgroundTransparency = 1
+	skillToggleBtn.Text = ""
+	skillToggleBtn.Parent = skillCard
+
+	_SKILL_BUTTONS[toolName] = {
+		card = skillCard,
+		stroke = skillStroke,
+		knob = skillToggleKnob,
+		bg = skillToggleBg,
+		btn = skillToggleBtn
+	}
+
+	skillToggleBtn.MouseButton1Click:Connect(function()
+		if _EQUIPPED_SKILLS[toolName] then
+			_EQUIPPED_SKILLS[toolName] = nil
+			TweenService:Create(skillToggleKnob, TW, {Position = UDim2.new(0, 3, 0.5, -9), BackgroundColor3 = Color3.fromRGB(200, 200, 220)}):Play()
+			TweenService:Create(skillToggleBg, TW, {BackgroundColor3 = C.OFF}):Play()
+			TweenService:Create(skillStroke, TW, {Color = C.BR}):Play()
+			UnequipTool(toolName)
+		else
+			_EQUIPPED_SKILLS[toolName] = true
+			TweenService:Create(skillToggleKnob, TW, {Position = UDim2.new(0, 24, 0.5, -9), BackgroundColor3 = Color3.white}):Play()
+			TweenService:Create(skillToggleBg, TW, {BackgroundColor3 = C.ON}):Play()
+			TweenService:Create(skillStroke, TW, {Color = C.AC}):Play()
+			EquipTool(toolName)
+		end
+	end)
+end
+
+local function UpdateSkillsList()
+	local allTools = {}
+	local bp = GetBackpack()
+	if bp then
+		for _, tool in pairs(bp:GetChildren()) do
+			if tool:IsA("Tool") then table.insert(allTools, tool.Name) end
+		end
+	end
+	if Player.Character then
+		for _, tool in pairs(Player.Character:GetChildren()) do
+			if tool:IsA("Tool") then
+				local found = false
+				for _, n in ipairs(allTools) do if n == tool.Name then found = true break end end
+				if not found then table.insert(allTools, tool.Name) end
+			end
+		end
+	end
+	for index, toolName in ipairs(allTools) do
+		if not _SKILL_BUTTONS[toolName] then CreateSkillButton(toolName, index) end
+	end
+	task.wait(0.1)
+	SkillsScroll.CanvasSize = UDim2.new(0, 0, 0, SkillsLayout.AbsoluteContentSize.Y + 10)
+end
+
+-- =====================================================
+-- FIX PRINCIPAL: escuta cada tool chegar na backpack
+-- Quando uma tool ativa chega, equipa imediatamente
+-- =====================================================
+local function HookBackpackEvents(backpack)
+	if not backpack then return end
+	backpack.ChildAdded:Connect(function(child)
+		if child:IsA("Tool") then
+			-- Criar botão se não existir
+			if not _SKILL_BUTTONS[child.Name] then
+				task.wait(0.05)
+				UpdateSkillsList()
+			end
+			-- Se esta tool estava ativa, equipa ela assim que chegou na backpack
+			if _EQUIPPED_SKILLS[child.Name] then
+				task.wait(0.1)
+				EquipTool(child.Name)
+			end
+		end
+	end)
+end
+
+-- Conecta na backpack atual
+HookBackpackEvents(GetBackpack())
+
+-- ==================== TAB SWITCHING ====================
+local function SwitchToPage(pageName)
+	_CURRENT_PAGE = pageName
+	if pageName == "AutoFarm" then
+		AutoFarmPage.Visible = true
+		SkillsPage.Visible = false
+		AutoFarmStroke.Color = C.AC; AutoFarmIcon.TextColor3 = C.AC; AutoFarmLabel.TextColor3 = C.AC
+		SkillsStroke.Color = C.BR; SkillsIcon.TextColor3 = C.TS; SkillsLabel.TextColor3 = C.TS
+	else
+		AutoFarmPage.Visible = false
+		SkillsPage.Visible = true
+		UpdateSkillsList()
+		AutoFarmStroke.Color = C.BR; AutoFarmIcon.TextColor3 = C.TS; AutoFarmLabel.TextColor3 = C.TS
+		SkillsStroke.Color = C.AC; SkillsIcon.TextColor3 = C.AC; SkillsLabel.TextColor3 = C.AC
+	end
+end
+
+AutoFarmTab.MouseButton1Click:Connect(function() SwitchToPage("AutoFarm") end)
+SkillsTab.MouseButton1Click:Connect(function() SwitchToPage("Skills") end)
+SwitchToPage("AutoFarm")
+
+-- ==================== LOOPS ====================
+task.spawn(function()
+	task.wait(2)
+	CacheAttackRemotes()
+	print("[Auto Attack] Cached " .. #_ATTACK_REMOTES .. " attack remotes")
+end)
+
+-- =====================================================
+-- LOOP PRINCIPAL DE FARM - TELEPORT DE LONGA DISTÂNCIA
+-- Agora teleporta a cada 0.3 segundos de QUALQUER lugar
+-- =====================================================
+task.spawn(function()
+	while task.wait(0.3) do
+		if _FARM and #_FARM_LIST > 0 then
+			local currentMob = _FARM_LIST[_FARM_INDEX]
+			if currentMob then
+				local mob, root, hum = FindMobByName(currentMob.name)
+				if mob and root and hum then
+					_FARM_TARGET = currentMob.name
+					_CURRENT_TARGET_ROOT = root
+					_CURRENT_TARGET_MODEL = mob
+					
+					-- TELEPORT IMEDIATO de longa distância
+					TeleportToTarget(root)
+					
+					if hum.Health <= 0 then
+						_CURRENT_TARGET_ROOT = nil
+						_CURRENT_TARGET_MODEL = nil
+						if #_FARM_LIST == 1 and currentMob.isBoss then
+							_FARM_TARGET = currentMob.name .. " (Respawning...)"
+							task.wait(3)
+						else
+							_FARM_INDEX = _FARM_INDEX + 1
+							if _FARM_INDEX > #_FARM_LIST then _FARM_INDEX = 1 end
+						end
+					end
+				else
+					_CURRENT_TARGET_ROOT = nil
+					_CURRENT_TARGET_MODEL = nil
+					if #_FARM_LIST == 1 and currentMob.isBoss then
+						_FARM_TARGET = currentMob.name .. " (Waiting...)"
+						task.wait(3)
+					else
+						_FARM_INDEX = _FARM_INDEX + 1
+						if _FARM_INDEX > #_FARM_LIST then _FARM_INDEX = 1 end
+					end
+				end
+			end
+		else
+			_FARM_TARGET = nil
+			_CURRENT_TARGET_ROOT = nil
+			_CURRENT_TARGET_MODEL = nil
+		end
+	end
+end)
+
+-- =====================================================
+-- LOOP DE RENDERSTEPPED - Mantém posição e ataca
+-- =====================================================
+RunService.RenderStepped:Connect(function()
+	if not _GUI_MINIMIZED and not UserInputService.MouseIconEnabled then
+		UserInputService.MouseIconEnabled = true
+	end
+	
+	-- Mantém posição fixa durante o farm
+	if _FARM and _FARM_POSITION and Player.Character then
+		local hrp = Player.Character:FindFirstChild("HumanoidRootPart")
+		if hrp then
+			hrp.CFrame = _FARM_POSITION
+			hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+			hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+		end
+	end
+end)
+
+local loop_name = RandomString(15)
+local loop_priority = Enum.RenderPriority.Camera.Value + math.random(1, 3)
+
+-- =====================================================
+-- LOOP DE COMBATE - Ataque e animações
+-- =====================================================
+RunService:BindToRenderStep(loop_name, loop_priority, function()
+	if _FARM and _CURRENT_TARGET_ROOT then
+		if _CURRENT_TARGET_ROOT:IsDescendantOf(workspace) then
+			-- Auto attack
+			if _AUTO_ATTACK_ACTIVE then 
+				SimulateClick() 
+			end
+			
+			-- Para animações
+			local lc = Player.Character
+			if lc then
+				local hum = lc:FindFirstChildOfClass("Humanoid")
+				if hum then
+					local animator = hum:FindFirstChildOfClass("Animator")
+					if animator then
+						for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+							if track.IsPlaying then track:Stop() end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	-- Auto-equip: só tenta se não está equipada E está na backpack
+	for toolName, _ in pairs(_EQUIPPED_SKILLS) do
+		local char = Player.Character
+		if char then
+			local hum = char:FindFirstChildOfClass("Humanoid")
+			if hum and not char:FindFirstChild(toolName) then
+				local bp = GetBackpack()
+				if bp and bp:FindFirstChild(toolName) then
+					EquipTool(toolName)
+				end
+			end
+		end
+	end
+end)
+
+-- ==================== EVENTOS GUI ====================
+local function ToggleMobList()
+	_MOBLIST_EXPANDED = not _MOBLIST_EXPANDED
+	if _MOBLIST_EXPANDED then
+		MobSection.Visible = true
+		TweenService:Create(MobSection, TW, {Size = UDim2.new(1, 0, 0, 250)}):Play()
+		TweenService:Create(MF, TW, {Size = UDim2.new(0, 340, 0, 475)}):Play()
+		TweenService:Create(ExpandArrow, TW, {Rotation = 180}):Play()
+		TweenService:Create(ExpandBtn, TW, {BackgroundColor3 = C.AC}):Play()
+	else
+		TweenService:Create(MobSection, TW, {Size = UDim2.new(1, 0, 0, 0)}):Play()
+		TweenService:Create(MF, TW, {Size = UDim2.new(0, 340, 0, 200)}):Play()
+		TweenService:Create(ExpandArrow, TW, {Rotation = 0}):Play()
+		TweenService:Create(ExpandBtn, TW, {BackgroundColor3 = Color3.fromRGB(70, 70, 100)}):Play()
+		task.wait(0.2)
+		MobSection.Visible = false
+	end
+end
+
+ExpandBtn.MouseButton1Click:Connect(function() ToggleMobList() end)
+
+ToggleBtn.MouseButton1Click:Connect(function()
+	_FARM = not _FARM
+	if _FARM then
+		TweenService:Create(ToggleKnob, TW, {Position = UDim2.new(0, 25, 0.5, -10), BackgroundColor3 = Color3.white}):Play()
+		TweenService:Create(ToggleBg, TW, {BackgroundColor3 = C.ON}):Play()
+		TweenService:Create(FarmStroke, TW, {Color = Color3.fromRGB(34, 197, 94)}):Play()
+		FarmSubtitle.Text = _FARM_TARGET or "Ativado"
+		FarmSubtitle.TextColor3 = C.OK
+		_FARM_INDEX = 1
+		if Player.Character then EnableAntiPush(Player.Character) end
+		_AUTO_ATTACK_ACTIVE = true
+		CacheAttackRemotes()
+	else
+		TweenService:Create(ToggleKnob, TW, {Position = UDim2.new(0, 3, 0.5, -10), BackgroundColor3 = Color3.fromRGB(200, 200, 220)}):Play()
+		TweenService:Create(ToggleBg, TW, {BackgroundColor3 = C.OFF}):Play()
+		TweenService:Create(FarmStroke, TW, {Color = C.BR}):Play()
+		FarmSubtitle.Text = "Desativado"
+		FarmSubtitle.TextColor3 = C.TS
+		DisableAntiPush()
+		_AUTO_ATTACK_ACTIVE = false
+	end
+end)
+
+task.spawn(function()
+	while task.wait(1) do
+		if _FARM and _FARM_TARGET then
+			FarmSubtitle.Text = "Target: " .. _FARM_TARGET
+		elseif _FARM then
+			FarmSubtitle.Text = "Selecione mobs"
+		end
+	end
+end)
+
+task.spawn(function()
+	while task.wait(0.1) do
+		SkillsScroll.CanvasSize = UDim2.new(0, 0, 0, SkillsLayout.AbsoluteContentSize.Y + 10)
+	end
+end)
+
+MB.MouseButton1Click:Connect(function()
+	_GUI_MINIMIZED = not _GUI_MINIMIZED
+	if _GUI_MINIMIZED then
+		TweenService:Create(MF, TW, {Size = UDim2.new(0, 340, 0, 40)}):Play()
+		ContentContainer.Visible = false
+		TabContainer.Visible = false
+		MB.Text = "□"
+	else
+		local targetHeight = _MOBLIST_EXPANDED and 475 or 200
+		TweenService:Create(MF, TW, {Size = UDim2.new(0, 340, 0, targetHeight)}):Play()
+		ContentContainer.Visible = true
+		TabContainer.Visible = true
+		MB.Text = "_"
+	end
+end)
+
+CB.MouseButton1Click:Connect(function()
+	DisableAntiPush()
+	_AUTO_ATTACK_ACTIVE = false
+	SG:Destroy()
+	RunService:UnbindFromRenderStep(loop_name)
+end)
+
+-- =====================================================
+-- CharacterAdded: reconecta backpack e re-equipa skills
+-- =====================================================
+Player.CharacterAdded:Connect(function(char)
+	task.wait(1)
+	if _FARM then EnableAntiPush(char) end
+	UserInputService.MouseIconEnabled = true
+
+	-- Reconecta listener da nova backpack
+	local newBp = Player:WaitForChild("Backpack", 10)
+	if newBp then
+		HookBackpackEvents(newBp)
+		UpdateSkillsList()
+	end
+end)
+
+print("[AnxieeScripts V5] Carregado! Teleport de longa distância FUNCIONANDO!")
