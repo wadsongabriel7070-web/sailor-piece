@@ -1,4 +1,4 @@
--- Anxiee Scripts V2 - Auto Farm + Skills (V10.1 - Fix Skills Layout)
+-- Anxiee Scripts V2 - Auto Farm + Skills (V10 - Key Toggles Z/X/C/V/F)
 
 local function RandomString(len)
 	local chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -12,11 +12,11 @@ end
 
 task.wait(math.random(100, 300) / 100)
 
-local Players             = game:GetService("Players")
-local RunService          = game:GetService("RunService")
-local TweenService        = game:GetService("TweenService")
-local ReplicatedStorage   = game:GetService("ReplicatedStorage")
-local UserInputService    = game:GetService("UserInputService")
+local Players           = game:GetService("Players")
+local RunService        = game:GetService("RunService")
+local TweenService      = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService  = game:GetService("UserInputService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local Player = Players.LocalPlayer
@@ -33,11 +33,11 @@ local _CACHE          = {}
 local _GUI_MINIMIZED  = false
 local _CURRENT_PAGE   = "AutoFarm"
 
-local _FARM_TARGET   = nil
-local _FARM_INDEX    = 1
-local _FARM_SUBINDEX = 1
-local _FARM_LIST     = {}
-local _SELECTED_MOBS = {}
+local _FARM_TARGET    = nil
+local _FARM_INDEX     = 1
+local _FARM_SUBINDEX  = 1
+local _FARM_LIST      = {}
+local _SELECTED_MOBS  = {}
 
 local _BOSS_TARGET    = nil
 local _BOSS_INDEX     = 1
@@ -74,7 +74,7 @@ local KEY_DEFS = {
 
 local _KEY_TOGGLES = { Z=false, X=false, C=false, V=false, F=false }
 local _KEY_LOOPS   = { Z=nil,   X=nil,   C=nil,   V=nil,   F=nil  }
-local KEY_INTERVAL = 5
+local KEY_INTERVAL = 1  -- segundos entre cada press
 
 -- =====================================================
 -- CORES
@@ -95,37 +95,20 @@ local C = {
 local TW = TweenInfo.new(0.18, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
 
 -- =====================================================
--- DIMENSÕES
+-- ALTURA DA GUI
 -- =====================================================
-local HEADER_H     = 40
-local TABS_H       = 35
-local TABS_TOP_PAD = 10
-local TABS_BOT_PAD = 10
-local CARD_H       = 55
-local CARD_GAP     = 8
-local BOTTOM_PAD   = 12
-local NUM_CARDS    = 2
-local GUI_W        = 300
+local HEADER_H      = 40
+local TABS_H        = 35
+local TABS_TOP_PAD  = 10
+local TABS_BOT_PAD  = 10
+local CARD_H        = 55
+local CARD_GAP      = 8
+local BOTTOM_PAD    = 12
+local NUM_CARDS     = 2
 
--- Altura da aba AutoFarm (2 cards)
-local AUTOFARM_CONTENT_H = NUM_CARDS * CARD_H + (NUM_CARDS - 1) * CARD_GAP
-
--- Altura da aba Skills:
---   label seção teclas (20) + gap (6) + container teclas (54) + gap (6)
---   + label seção tools (20) + gap (6) + scrolling tools (3 × 45 + 2 × 6 = 147) + pad (10)
---   Total fixo visível = ~269  →  usamos 270 para ficar confortável
-local SKILLS_LABEL_H   = 20
-local SKILLS_KEYCARD_H = 54
-local SKILLS_TOOLS_H   = 150   -- altura visível do scroll de tools (pode rolar)
-local SKILLS_CONTENT_H = SKILLS_LABEL_H + 6 + SKILLS_KEYCARD_H + 6 + SKILLS_LABEL_H + 6 + SKILLS_TOOLS_H + 10
-
-local CHROME_H = HEADER_H + TABS_TOP_PAD + TABS_H + TABS_BOT_PAD  -- altura fixa do topo
-
-local GUI_H_FARM   = CHROME_H + AUTOFARM_CONTENT_H + BOTTOM_PAD
-local GUI_H_SKILLS = CHROME_H + SKILLS_CONTENT_H   + BOTTOM_PAD
-
--- Altura inicial (começa na aba AutoFarm)
-local GUI_H_CURRENT = GUI_H_FARM
+local CONTENT_H = NUM_CARDS * CARD_H + (NUM_CARDS - 1) * CARD_GAP
+local GUI_H     = HEADER_H + TABS_TOP_PAD + TABS_H + TABS_BOT_PAD + CONTENT_H + BOTTOM_PAD
+local CONTENT_TOP = HEADER_H + TABS_TOP_PAD + TABS_H + TABS_BOT_PAD
 
 -- =====================================================
 -- HELPERS
@@ -148,10 +131,10 @@ local function EnableAntiPush(char)
 	if _BODY_VELOCITY then pcall(function() _BODY_VELOCITY:Destroy() end) end
 	if _BODY_GYRO     then pcall(function() _BODY_GYRO:Destroy()     end) end
 	_BODY_VELOCITY = Instance.new("BodyVelocity")
-	_BODY_VELOCITY.Name     = RandomString(10)
-	_BODY_VELOCITY.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-	_BODY_VELOCITY.Velocity = Vector3.new(0, 0, 0)
-	_BODY_VELOCITY.Parent   = hrp
+	_BODY_VELOCITY.Name      = RandomString(10)
+	_BODY_VELOCITY.MaxForce  = Vector3.new(math.huge, math.huge, math.huge)
+	_BODY_VELOCITY.Velocity  = Vector3.new(0, 0, 0)
+	_BODY_VELOCITY.Parent    = hrp
 	_BODY_GYRO = Instance.new("BodyGyro")
 	_BODY_GYRO.Name      = RandomString(10)
 	_BODY_GYRO.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
@@ -216,7 +199,8 @@ local function SimulateClick()
 end
 
 -- =====================================================
--- KEY PRESS
+-- KEY PRESS SIMULATION
+-- Tenta VirtualInputManager primeiro; fallback FireServer
 -- =====================================================
 local function PressKey(keyEnum)
 	pcall(function()
@@ -226,9 +210,13 @@ local function PressKey(keyEnum)
 	end)
 end
 
+-- =====================================================
+-- START / STOP KEY LOOP
+-- =====================================================
 local function StartKeyLoop(keyStr, keyEnum)
 	if _KEY_LOOPS[keyStr] then return end
-	_KEY_LOOPS[keyStr] = true
+	local alive = true
+	_KEY_LOOPS[keyStr] = alive
 	task.spawn(function()
 		while _KEY_TOGGLES[keyStr] do
 			PressKey(keyEnum)
@@ -244,6 +232,7 @@ end
 
 local function StopKeyLoop(keyStr)
 	_KEY_TOGGLES[keyStr] = false
+	-- loop vai parar naturalmente na próxima iteração
 end
 
 -- =====================================================
@@ -272,9 +261,9 @@ local function FindMobByName(name)
 	end
 	if name:find("Boss") then
 		local base = name:gsub("Boss", "")
-		local ac2  = workspace:FindFirstChild("TimedBossSpawn_" .. base .. "_Container")
-		if ac2 then
-			local bm = ac2:FindFirstChild("TimedBossSpawn_" .. name)
+		local ac = workspace:FindFirstChild("TimedBossSpawn_" .. base .. "_Container")
+		if ac then
+			local bm = ac:FindFirstChild("TimedBossSpawn_" .. name)
 			if bm and bm:IsA("Model") then
 				local hum = bm:FindFirstChildOfClass("Humanoid")
 				if hum and hum.Health > 0 then local r = FindR(bm); if r then return bm, r, hum end end
@@ -285,11 +274,11 @@ local function FindMobByName(name)
 end
 
 -- =====================================================
--- TOOLS
+-- SKILLS
 -- =====================================================
 local function EquipTool(toolName)
 	local char = Player.Character; if not char then return false end
-	local hum  = char:FindFirstChildOfClass("Humanoid"); if not hum then return false end
+	local hum = char:FindFirstChildOfClass("Humanoid"); if not hum then return false end
 	if char:FindFirstChild(toolName) then return true end
 	local bp = GetBackpack()
 	if bp then
@@ -301,7 +290,7 @@ end
 
 local function UnequipTool(toolName)
 	local char = Player.Character; if not char then return false end
-	local et   = char:FindFirstChild(toolName)
+	local et = char:FindFirstChild(toolName)
 	if et and et:IsA("Tool") then
 		local bp = GetBackpack(); if bp then et.Parent = bp end; return true
 	end
@@ -356,21 +345,20 @@ SG.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 SG.DisplayOrder   = math.random(5000, 8000)
 SG.IgnoreGuiInset = true
 
-local ok2 = pcall(function() SG.Parent = game:GetService("CoreGui") end)
-if not ok2 then SG.Parent = Player:WaitForChild("PlayerGui") end
+local ok = pcall(function() SG.Parent = game:GetService("CoreGui") end)
+if not ok then SG.Parent = Player:WaitForChild("PlayerGui") end
 
 -- =====================================================
 -- MAIN FRAME
 -- =====================================================
 local MF = Instance.new("Frame")
 MF.Name             = "MainFrame"
-MF.Size             = UDim2.new(0, GUI_W, 0, GUI_H_FARM)
-MF.Position         = UDim2.new(0.5, -GUI_W/2, 0.5, -(GUI_H_FARM/2))
+MF.Size             = UDim2.new(0, 300, 0, GUI_H)
+MF.Position         = UDim2.new(0.5, -150, 0.5, -(GUI_H / 2))
 MF.BackgroundColor3 = C.BG
 MF.BorderSizePixel  = 0
 MF.Active           = true
 MF.Draggable        = true
-MF.ClipsDescendants = true   -- ← impede qualquer filho de vazar para fora
 MF.Parent           = SG
 Instance.new("UICorner", MF).CornerRadius = UDim.new(0, 16)
 
@@ -396,27 +384,27 @@ HF.BackgroundColor3 = C.BG
 HF.BorderSizePixel  = 0
 HF.Parent           = HD
 
-local TitleLbl = Instance.new("TextLabel")
-TitleLbl.Size                 = UDim2.new(1, -50, 0, 18)
-TitleLbl.Position             = UDim2.new(0, 15, 0, 5)
-TitleLbl.BackgroundTransparency = 1
-TitleLbl.Text                 = "\u{26A1} Anxiee Scripts"
-TitleLbl.TextColor3           = C.TP
-TitleLbl.TextSize             = 14
-TitleLbl.Font                 = Enum.Font.GothamBold
-TitleLbl.TextXAlignment       = Enum.TextXAlignment.Left
-TitleLbl.Parent               = HD
+local TL = Instance.new("TextLabel")
+TL.Size                 = UDim2.new(1, -50, 0, 18)
+TL.Position             = UDim2.new(0, 15, 0, 5)
+TL.BackgroundTransparency = 1
+TL.Text                 = "\u{26A1} Anxiee Scripts"
+TL.TextColor3           = C.TP
+TL.TextSize             = 14
+TL.Font                 = Enum.Font.GothamBold
+TL.TextXAlignment       = Enum.TextXAlignment.Left
+TL.Parent               = HD
 
-local StatusLbl = Instance.new("TextLabel")
-StatusLbl.Size                 = UDim2.new(1, -50, 0, 12)
-StatusLbl.Position             = UDim2.new(0, 15, 0, 23)
-StatusLbl.BackgroundTransparency = 1
-StatusLbl.Text                 = "\u{25CF} Active"
-StatusLbl.TextColor3           = C.OK
-StatusLbl.TextSize             = 9
-StatusLbl.Font                 = Enum.Font.Gotham
-StatusLbl.TextXAlignment       = Enum.TextXAlignment.Left
-StatusLbl.Parent               = HD
+local ML = Instance.new("TextLabel")
+ML.Size                 = UDim2.new(1, -50, 0, 12)
+ML.Position             = UDim2.new(0, 15, 0, 23)
+ML.BackgroundTransparency = 1
+ML.Text                 = "\u{25CF} Active"
+ML.TextColor3           = C.OK
+ML.TextSize             = 9
+ML.Font                 = Enum.Font.Gotham
+ML.TextXAlignment       = Enum.TextXAlignment.Left
+ML.Parent               = HD
 
 local MB = Instance.new("TextButton")
 MB.Size             = UDim2.new(0, 28, 0, 28)
@@ -483,17 +471,11 @@ local SkillsTab,   SkillsStroke,   SkillsIcon,   SkillsLabel   = CreateTab("Skil
 
 -- =====================================================
 -- CONTENT AREA
--- A ContentContainer agora usa posição absoluta e
--- muda de tamanho junto com a GUI ao trocar de aba
 -- =====================================================
-local CONTENT_TOP_ABS = CHROME_H  -- Y onde começa o conteúdo
-
 local ContentContainer = Instance.new("Frame")
-ContentContainer.Name                 = "ContentContainer"
-ContentContainer.Size                 = UDim2.new(1, -20, 0, AUTOFARM_CONTENT_H)
-ContentContainer.Position             = UDim2.new(0, 10, 0, CONTENT_TOP_ABS)
+ContentContainer.Size                 = UDim2.new(1, -20, 0, CONTENT_H)
+ContentContainer.Position             = UDim2.new(0, 10, 0, CONTENT_TOP)
 ContentContainer.BackgroundTransparency = 1
-ContentContainer.ClipsDescendants     = true
 ContentContainer.Parent               = MF
 
 -- =====================================================
@@ -511,7 +493,7 @@ AutoFarmLayout.Padding = UDim.new(0, CARD_GAP)
 AutoFarmLayout.Parent  = AutoFarmPage
 
 -- =====================================================
--- HELPERS GUI
+-- HELPER: ícone de seta
 -- =====================================================
 local function SetExpandIcon(btn, isOpen, accentColor)
 	for _, ch in ipairs(btn:GetChildren()) do
@@ -532,7 +514,10 @@ local function SetExpandIcon(btn, isOpen, accentColor)
 	lbl.Parent               = btn
 end
 
-local function CreateFarmCard(parent, icon, iconColor, iconBG, title)
+-- =====================================================
+-- HELPER: cria card de farm
+-- =====================================================
+local function CreateFarmCard(parent, icon, iconColor, iconBG, title, accentColor)
 	local card = Instance.new("Frame")
 	card.Size             = UDim2.new(1, 0, 0, CARD_H)
 	card.BackgroundColor3 = C.SF
@@ -572,7 +557,7 @@ local function CreateFarmCard(parent, icon, iconColor, iconBG, title)
 	subLbl.Size                 = UDim2.new(1, -155, 0, 15)
 	subLbl.Position             = UDim2.new(0, 50, 0, 30)
 	subLbl.BackgroundTransparency = 1
-	subLbl.Text                 = "Desativado"
+	subLbl.Text                 = "OFF"
 	subLbl.TextColor3           = C.TS
 	subLbl.TextSize             = 11
 	subLbl.Font                 = Enum.Font.Gotham
@@ -588,6 +573,7 @@ local function CreateFarmCard(parent, icon, iconColor, iconBG, title)
 	expandBtn.ZIndex           = 5
 	expandBtn.Parent           = card
 	Instance.new("UICorner", expandBtn).CornerRadius = UDim.new(0, 7)
+
 	SetExpandIcon(expandBtn, false, C.TS)
 
 	local togBg = Instance.new("Frame")
@@ -617,16 +603,16 @@ local function CreateFarmCard(parent, icon, iconColor, iconBG, title)
 end
 
 -- =====================================================
--- FARM CARD
+-- FARM CARD (Mobs)
 -- =====================================================
 local FarmCard, FarmStroke, FarmSubtitle, MobExpandBtn, ToggleBg, ToggleKnob, ToggleBtn =
-	CreateFarmCard(AutoFarmPage, "\u{26A1}", Color3.fromRGB(34,197,94), Color3.fromRGB(32,32,48), "Auto Farm")
+	CreateFarmCard(AutoFarmPage, "\u{26A1}", Color3.fromRGB(34,197,94), Color3.fromRGB(32,32,48), "Auto Farm [MOB]", C.OK)
 
 -- =====================================================
 -- BOSS CARD
 -- =====================================================
 local BossCard, BossCardStroke, BossSubtitle, BossExpandBtn, BossToggleBg, BossToggleKnob, BossToggleBtn =
-	CreateFarmCard(AutoFarmPage, "\u{1F451}", C.BOSS, Color3.fromRGB(40,30,10), "Boss Farm")
+	CreateFarmCard(AutoFarmPage, "\u{1F451}", C.BOSS, Color3.fromRGB(40,30,10), "Auto Farm [MOB]", C.BOSS)
 
 -- =====================================================
 -- SIDE PANEL
@@ -639,14 +625,14 @@ local SIDE_GAP     = 8
 
 local function CreateSidePanel(accentColor, headerText)
 	local panel = Instance.new("Frame")
-	panel.Name             = "SidePanel"
-	panel.Size             = UDim2.new(0, SIDE_W, 0, 0)
-	panel.BackgroundColor3 = Color3.fromRGB(22, 22, 34)
-	panel.BorderSizePixel  = 0
-	panel.Visible          = false
-	panel.ClipsDescendants = true
-	panel.ZIndex           = 20
-	panel.Parent           = SG
+	panel.Name              = "SidePanel"
+	panel.Size              = UDim2.new(0, SIDE_W, 0, 0)
+	panel.BackgroundColor3  = Color3.fromRGB(22, 22, 34)
+	panel.BorderSizePixel   = 0
+	panel.Visible           = false
+	panel.ClipsDescendants  = true
+	panel.ZIndex            = 20
+	panel.Parent            = SG
 	Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 10)
 
 	local ds = Instance.new("UIStroke")
@@ -684,7 +670,7 @@ local function CreateSidePanel(accentColor, headerText)
 end
 
 local MobDropdown,  MobDropScroll,  MobDropLayout  = CreateSidePanel(C.AC,   "  Mobs")
-local BossDropdown, BossDropScroll, BossDropLayout  = CreateSidePanel(C.BOSS, "  Bosses")
+local BossDropdown, BossDropScroll, BossDropLayout = CreateSidePanel(C.BOSS, "  Bosses")
 
 local _MOB_DROP_OPEN  = false
 local _BOSS_DROP_OPEN = false
@@ -696,11 +682,14 @@ local function PositionSidePanel(panel, anchorBtn)
 	local btnY   = anchorBtn.AbsolutePosition.Y
 	local sh     = workspace.CurrentCamera.ViewportSize.Y
 	local sw     = workspace.CurrentCamera.ViewportSize.X
+
 	if x + SIDE_W > sw - 4 then x = mfPos.X - SIDE_W - SIDE_GAP end
 	if x < 4 then x = 4 end
+
 	local y = btnY
 	if y + SIDE_MAX_H > sh - 4 then y = sh - SIDE_MAX_H - 4 end
 	if y < 4 then y = 4 end
+
 	panel.Position = UDim2.new(0, x, 0, y)
 end
 
@@ -708,7 +697,9 @@ local function PopulateSidePanel(scroll, layout, groups, selectedTable, groupsLi
 	for _, ch in ipairs(scroll:GetChildren()) do
 		if ch:IsA("Frame") or ch:IsA("TextButton") then ch:Destroy() end
 	end
+
 	local accentColor = isBoss and C.BOSS or C.ON
+
 	for _, groupData in ipairs(groups) do
 		local row = Instance.new("TextButton")
 		row.Size             = UDim2.new(1, -6, 0, SIDE_ITEM_H)
@@ -785,6 +776,7 @@ local function PopulateSidePanel(scroll, layout, groups, selectedTable, groupsLi
 			end
 		end)
 	end
+
 	task.spawn(function()
 		task.wait(0.05)
 		scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 8)
@@ -794,13 +786,16 @@ end
 local function OpenSidePanel(panel, scroll, layout, groups, selectedTable, groupsList, isBoss, anchorBtn)
 	PopulateSidePanel(scroll, layout, groups, selectedTable, groupsList, isBoss)
 	PositionSidePanel(panel, anchorBtn)
+
 	panel.Size    = UDim2.new(0, SIDE_W, 0, 0)
 	panel.Visible = true
+
 	task.spawn(function()
 		task.wait(0.06)
 		local totalH = math.min(layout.AbsoluteContentSize.Y + 36, SIDE_MAX_H)
 		TweenService:Create(panel, TW, {Size = UDim2.new(0, SIDE_W, 0, totalH)}):Play()
 	end)
+
 	TweenService:Create(panel, TW, {Size = UDim2.new(0, SIDE_W, 0, SIDE_MAX_H)}):Play()
 end
 
@@ -854,80 +849,20 @@ end)
 
 -- =====================================================
 -- SKILLS PAGE
--- Tem tamanho próprio: SKILLS_CONTENT_H
--- Usa layout absoluto (sem UIListLayout no topo)
--- para ter controle total das posições
 -- =====================================================
 local SkillsPage = Instance.new("Frame")
 SkillsPage.Name                 = "SkillsPage"
-SkillsPage.Size                 = UDim2.new(1, 0, 0, SKILLS_CONTENT_H)
-SkillsPage.Position             = UDim2.new(0, 0, 0, 0)
+SkillsPage.Size                 = UDim2.new(1, 0, 1, 0)
 SkillsPage.BackgroundTransparency = 1
 SkillsPage.Visible              = false
 SkillsPage.Parent               = ContentContainer
 
--- Cursor Y interno da página Skills (posicionamento manual)
-local SKY = 0  -- acumula a posição Y dos elementos
-
--- ── Label "AUTO KEY PRESS" ──────────────────────────
-local KeySectionLbl = Instance.new("TextLabel")
-KeySectionLbl.Size                 = UDim2.new(1, 0, 0, SKILLS_LABEL_H)
-KeySectionLbl.Position             = UDim2.new(0, 0, 0, SKY)
-KeySectionLbl.BackgroundTransparency = 1
-KeySectionLbl.Text                 = "  \u{2328} AUTO KEY PRESS  (a cada 5s)"
-KeySectionLbl.TextColor3           = C.TS
-KeySectionLbl.TextSize             = 10
-KeySectionLbl.Font                 = Enum.Font.GothamBold
-KeySectionLbl.TextXAlignment       = Enum.TextXAlignment.Left
-KeySectionLbl.Parent               = SkillsPage
-SKY = SKY + SKILLS_LABEL_H + 4
-
--- ── Container dos 5 toggles de tecla ───────────────
-local KeyToggleContainer = Instance.new("Frame")
-KeyToggleContainer.Name             = "KeyToggleContainer"
-KeyToggleContainer.Size             = UDim2.new(1, 0, 0, SKILLS_KEYCARD_H)
-KeyToggleContainer.Position         = UDim2.new(0, 0, 0, SKY)
-KeyToggleContainer.BackgroundColor3 = Color3.fromRGB(22, 22, 34)
-KeyToggleContainer.BorderSizePixel  = 0
-KeyToggleContainer.Parent           = SkillsPage
-Instance.new("UICorner", KeyToggleContainer).CornerRadius = UDim.new(0, 10)
-
-local KeyContainerStroke = Instance.new("UIStroke")
-KeyContainerStroke.Color     = C.BR
-KeyContainerStroke.Thickness = 1
-KeyContainerStroke.Parent    = KeyToggleContainer
-
-local KeyRowLayout = Instance.new("UIListLayout")
-KeyRowLayout.FillDirection       = Enum.FillDirection.Horizontal
-KeyRowLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-KeyRowLayout.VerticalAlignment   = Enum.VerticalAlignment.Center
-KeyRowLayout.Padding             = UDim.new(0, 6)
-KeyRowLayout.Parent              = KeyToggleContainer
-
-SKY = SKY + SKILLS_KEYCARD_H + 6
-
--- ── Label "TOOLS / SKILLS" ─────────────────────────
-local ToolSectionLbl = Instance.new("TextLabel")
-ToolSectionLbl.Size                 = UDim2.new(1, 0, 0, SKILLS_LABEL_H)
-ToolSectionLbl.Position             = UDim2.new(0, 0, 0, SKY)
-ToolSectionLbl.BackgroundTransparency = 1
-ToolSectionLbl.Text                 = "  \u{1F9F0} TOOLS / SKILLS"
-ToolSectionLbl.TextColor3           = C.TS
-ToolSectionLbl.TextSize             = 10
-ToolSectionLbl.Font                 = Enum.Font.GothamBold
-ToolSectionLbl.TextXAlignment       = Enum.TextXAlignment.Left
-ToolSectionLbl.Parent               = SkillsPage
-SKY = SKY + SKILLS_LABEL_H + 4
-
--- ── ScrollingFrame dos tools ───────────────────────
 local SkillsScroll = Instance.new("ScrollingFrame")
-SkillsScroll.Size                  = UDim2.new(1, 0, 0, SKILLS_TOOLS_H)
-SkillsScroll.Position              = UDim2.new(0, 0, 0, SKY)
+SkillsScroll.Size                  = UDim2.new(1, 0, 1, 0)
 SkillsScroll.BackgroundTransparency = 1
 SkillsScroll.BorderSizePixel       = 0
 SkillsScroll.ScrollBarThickness    = 4
 SkillsScroll.ScrollBarImageColor3  = C.AC
-SkillsScroll.CanvasSize            = UDim2.new(0, 0, 0, 0)
 SkillsScroll.Parent                = SkillsPage
 
 local SkillsLayout = Instance.new("UIListLayout")
@@ -935,14 +870,61 @@ SkillsLayout.Padding = UDim.new(0, 6)
 SkillsLayout.Parent  = SkillsScroll
 
 -- =====================================================
--- KEY CARD UI (Z / X / C / V / F)
+-- SECTION LABEL helper
 -- =====================================================
-local _KEY_UI = {}
+local function CreateSectionLabel(parent, text)
+	local lbl = Instance.new("TextLabel")
+	lbl.Size                 = UDim2.new(1, 0, 0, 20)
+	lbl.BackgroundTransparency = 1
+	lbl.Text                 = text
+	lbl.TextColor3           = C.TS
+	lbl.TextSize             = 10
+	lbl.Font                 = Enum.Font.GothamBold
+	lbl.TextXAlignment       = Enum.TextXAlignment.Left
+	lbl.Parent               = parent
+	return lbl
+end
+
+-- =====================================================
+-- KEY TOGGLE SECTION  (Z / X / C / V / F)
+-- Aparece no topo da página Skills
+-- =====================================================
+
+-- Separador de seção
+local KeySectionLbl = CreateSectionLabel(SkillsScroll, "  \u{2328} AUTO KEY PRESS  (a cada 5s)")
+KeySectionLbl.LayoutOrder = -999  -- garante que fique no topo
+
+-- Container dos 5 toggles de tecla
+local KeyToggleContainer = Instance.new("Frame")
+KeyToggleContainer.Name             = "KeyToggleContainer"
+KeyToggleContainer.Size             = UDim2.new(1, 0, 0, 54)  -- altura do card
+KeyToggleContainer.BackgroundColor3 = Color3.fromRGB(22, 22, 34)
+KeyToggleContainer.BorderSizePixel  = 0
+KeyToggleContainer.LayoutOrder      = -998
+KeyToggleContainer.Parent           = SkillsScroll
+Instance.new("UICorner", KeyToggleContainer).CornerRadius = UDim.new(0, 10)
+
+local KeyContainerStroke = Instance.new("UIStroke")
+KeyContainerStroke.Color     = C.BR
+KeyContainerStroke.Thickness = 1
+KeyContainerStroke.Parent    = KeyToggleContainer
+
+-- Layout horizontal dos 5 botões dentro do container
+local KeyRowLayout = Instance.new("UIListLayout")
+KeyRowLayout.FillDirection       = Enum.FillDirection.Horizontal
+KeyRowLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+KeyRowLayout.VerticalAlignment   = Enum.VerticalAlignment.Center
+KeyRowLayout.Padding             = UDim.new(0, 6)
+KeyRowLayout.Parent              = KeyToggleContainer
+
+-- Referências para atualizar visualmente
+local _KEY_UI = {}  -- _KEY_UI[keyStr] = { bg, knob, btn, card, stroke }
 
 for _, kd in ipairs(KEY_DEFS) do
 	local ks  = kd.key
 	local ken = kd.enum
 
+	-- Card de cada tecla
 	local kCard = Instance.new("Frame")
 	kCard.Size             = UDim2.new(0, 50, 0, 42)
 	kCard.BackgroundColor3 = Color3.fromRGB(30, 30, 46)
@@ -955,6 +937,7 @@ for _, kd in ipairs(KEY_DEFS) do
 	kStroke.Thickness = 1
 	kStroke.Parent    = kCard
 
+	-- Label da tecla (ex: "Z")
 	local kLbl = Instance.new("TextLabel")
 	kLbl.Size                 = UDim2.new(1, 0, 0, 18)
 	kLbl.Position             = UDim2.new(0, 0, 0, 3)
@@ -966,6 +949,7 @@ for _, kd in ipairs(KEY_DEFS) do
 	kLbl.TextXAlignment       = Enum.TextXAlignment.Center
 	kLbl.Parent               = kCard
 
+	-- Mini toggle switch
 	local kTogBg = Instance.new("Frame")
 	kTogBg.Size             = UDim2.new(0, 36, 0, 18)
 	kTogBg.Position         = UDim2.new(0.5, -18, 1, -22)
@@ -982,34 +966,51 @@ for _, kd in ipairs(KEY_DEFS) do
 	kTogKnob.Parent           = kTogBg
 	Instance.new("UICorner", kTogKnob).CornerRadius = UDim.new(1, 0)
 
+	-- Botão invisível sobre o card inteiro
 	local kTogBtn = Instance.new("TextButton")
 	kTogBtn.Size                 = UDim2.new(1, 0, 1, 0)
 	kTogBtn.BackgroundTransparency = 1
 	kTogBtn.Text                 = ""
 	kTogBtn.Parent               = kCard
 
-	_KEY_UI[ks] = { bg=kTogBg, knob=kTogKnob, btn=kTogBtn, card=kCard, stroke=kStroke, lbl=kLbl }
+	_KEY_UI[ks] = { bg=kTogBg, knob=kTogKnob, btn=kTogBtn, card=kCard, stroke=kStroke }
 
+	-- Lógica do toggle
 	kTogBtn.MouseButton1Click:Connect(function()
 		_KEY_TOGGLES[ks] = not _KEY_TOGGLES[ks]
+
 		if _KEY_TOGGLES[ks] then
-			TweenService:Create(kTogKnob, TW, {Position=UDim2.new(0,20,0.5,-7), BackgroundColor3=Color3.white}):Play()
-			TweenService:Create(kTogBg,   TW, {BackgroundColor3=C.ON}):Play()
-			TweenService:Create(kStroke,  TW, {Color=C.AC}):Play()
-			TweenService:Create(kLbl,     TW, {TextColor3=C.TP}):Play()
+			-- Ativar: visual ON
+			TweenService:Create(kTogKnob, TW, {
+				Position         = UDim2.new(0, 20, 0.5, -7),
+				BackgroundColor3 = Color3.white
+			}):Play()
+			TweenService:Create(kTogBg,   TW, {BackgroundColor3 = C.ON}):Play()
+			TweenService:Create(kStroke,  TW, {Color = C.AC}):Play()
+			TweenService:Create(kLbl,     TW, {TextColor3 = C.TP}):Play()
+
 			StartKeyLoop(ks, ken)
 		else
-			TweenService:Create(kTogKnob, TW, {Position=UDim2.new(0,2,0.5,-7), BackgroundColor3=Color3.fromRGB(200,200,220)}):Play()
-			TweenService:Create(kTogBg,  TW, {BackgroundColor3=C.OFF}):Play()
-			TweenService:Create(kStroke, TW, {Color=C.BR}):Play()
-			TweenService:Create(kLbl,    TW, {TextColor3=C.AC}):Play()
+			-- Desativar: visual OFF
+			TweenService:Create(kTogKnob, TW, {
+				Position         = UDim2.new(0, 2, 0.5, -7),
+				BackgroundColor3 = Color3.fromRGB(200, 200, 220)
+			}):Play()
+			TweenService:Create(kTogBg,  TW, {BackgroundColor3 = C.OFF}):Play()
+			TweenService:Create(kStroke, TW, {Color = C.BR}):Play()
+			TweenService:Create(kLbl,    TW, {TextColor3 = C.AC}):Play()
+
 			StopKeyLoop(ks)
 		end
 	end)
 end
 
+-- Separador entre teclas e ferramentas
+local ToolSectionLbl = CreateSectionLabel(SkillsScroll, "  \u{1F9F0} TOOLS / SKILLS")
+ToolSectionLbl.LayoutOrder = -997
+
 -- =====================================================
--- SKILL TOOL BUTTONS
+-- SKILL TOOL BUTTONS (existentes)
 -- =====================================================
 local function CreateSkillButton(toolName, index)
 	if _SKILL_BUTTONS[toolName] then return end
@@ -1115,7 +1116,7 @@ local function HookBackpackEvents(bp)
 	bp.ChildAdded:Connect(function(child)
 		if child:IsA("Tool") then
 			if not _SKILL_BUTTONS[child.Name] then task.wait(0.05); UpdateSkillsList() end
-			if _EQUIPPED_SKILLS[child.Name]   then task.wait(0.1);  EquipTool(child.Name) end
+			if _EQUIPPED_SKILLS[child.Name] then task.wait(0.1); EquipTool(child.Name) end
 		end
 	end)
 end
@@ -1123,33 +1124,20 @@ end
 HookBackpackEvents(GetBackpack())
 
 -- =====================================================
--- TAB SWITCHING  (redimensiona MF + ContentContainer)
+-- TAB SWITCHING
 -- =====================================================
 local function SwitchToPage(page)
 	_CURRENT_PAGE = page
 	if page == "AutoFarm" then
-		AutoFarmPage.Visible = true
-		SkillsPage.Visible   = false
-
-		-- Resize GUI para aba AutoFarm
-		ContentContainer.Size = UDim2.new(1, -20, 0, AUTOFARM_CONTENT_H)
-		TweenService:Create(MF, TW, {Size = UDim2.new(0, GUI_W, 0, GUI_H_FARM)}):Play()
-
-		AutoFarmStroke.Color = C.AC; AutoFarmIcon.TextColor3 = C.AC; AutoFarmLabel.TextColor3 = C.AC
-		SkillsStroke.Color   = C.BR; SkillsIcon.TextColor3   = C.TS; SkillsLabel.TextColor3   = C.TS
+		AutoFarmPage.Visible = true;  SkillsPage.Visible = false
+		AutoFarmStroke.Color = C.AC;  AutoFarmIcon.TextColor3 = C.AC;  AutoFarmLabel.TextColor3 = C.AC
+		SkillsStroke.Color   = C.BR;  SkillsIcon.TextColor3   = C.TS;  SkillsLabel.TextColor3   = C.TS
 	else
-		AutoFarmPage.Visible = false
-		SkillsPage.Visible   = true
+		AutoFarmPage.Visible = false; SkillsPage.Visible = true
 		UpdateSkillsList()
-
-		-- Resize GUI para aba Skills
-		ContentContainer.Size = UDim2.new(1, -20, 0, SKILLS_CONTENT_H)
-		TweenService:Create(MF, TW, {Size = UDim2.new(0, GUI_W, 0, GUI_H_SKILLS)}):Play()
-
-		AutoFarmStroke.Color = C.BR; AutoFarmIcon.TextColor3 = C.TS; AutoFarmLabel.TextColor3 = C.TS
-		SkillsStroke.Color   = C.AC; SkillsIcon.TextColor3   = C.AC; SkillsLabel.TextColor3   = C.AC
-
-		if _MOB_DROP_OPEN then
+		AutoFarmStroke.Color = C.BR;  AutoFarmIcon.TextColor3 = C.TS;  AutoFarmLabel.TextColor3 = C.TS
+		SkillsStroke.Color   = C.AC;  SkillsIcon.TextColor3   = C.AC;  SkillsLabel.TextColor3   = C.AC
+		if _MOB_DROP_OPEN  then
 			_MOB_DROP_OPEN = false
 			CloseSidePanel(MobDropdown)
 			SetExpandIcon(MobExpandBtn, false, C.TS)
@@ -1182,7 +1170,7 @@ local function AdvanceIndex(list, index, subindex, groupCount)
 	subindex = subindex + 1
 	if subindex > groupCount then
 		subindex = 1
-		index    = index + 1
+		index = index + 1
 		if index > #list then index = 1 end
 	end
 	return index, subindex
@@ -1327,9 +1315,9 @@ ToggleBtn.MouseButton1Click:Connect(function()
 		TweenService:Create(ToggleKnob, TW, {Position=UDim2.new(0,23,0.5,-9), BackgroundColor3=Color3.white}):Play()
 		TweenService:Create(ToggleBg,   TW, {BackgroundColor3=C.ON}):Play()
 		TweenService:Create(FarmStroke, TW, {Color=C.OK}):Play()
-		FarmSubtitle.Text       = _FARM_TARGET or "Ativado"
+		FarmSubtitle.Text       = _FARM_TARGET or "ON"
 		FarmSubtitle.TextColor3 = C.OK
-		_FARM_INDEX = 1; _FARM_SUBINDEX = 1
+		_FARM_INDEX   = 1; _FARM_SUBINDEX = 1
 		if Player.Character then EnableAntiPush(Player.Character) end
 		_AUTO_ATTACK_ACTIVE = true
 		CacheAttackRemotes()
@@ -1337,7 +1325,7 @@ ToggleBtn.MouseButton1Click:Connect(function()
 		TweenService:Create(ToggleKnob, TW, {Position=UDim2.new(0,3,0.5,-9), BackgroundColor3=Color3.fromRGB(200,200,220)}):Play()
 		TweenService:Create(ToggleBg,   TW, {BackgroundColor3=C.OFF}):Play()
 		TweenService:Create(FarmStroke, TW, {Color=C.BR}):Play()
-		FarmSubtitle.Text       = "Desativado"
+		FarmSubtitle.Text       = "OFF"
 		FarmSubtitle.TextColor3 = C.TS
 		if not _BOSS_FARM then DisableAntiPush(); _AUTO_ATTACK_ACTIVE = false end
 	end
@@ -1352,7 +1340,7 @@ BossToggleBtn.MouseButton1Click:Connect(function()
 		TweenService:Create(BossToggleKnob, TW, {Position=UDim2.new(0,23,0.5,-9), BackgroundColor3=Color3.white}):Play()
 		TweenService:Create(BossToggleBg,   TW, {BackgroundColor3=C.BOSS}):Play()
 		TweenService:Create(BossCardStroke, TW, {Color=C.BOSS}):Play()
-		BossSubtitle.Text       = _BOSS_TARGET or "Ativado"
+		BossSubtitle.Text       = _BOSS_TARGET or "ON"
 		BossSubtitle.TextColor3 = C.BOSS
 		_BOSS_INDEX = 1; _BOSS_SUBINDEX = 1
 		if Player.Character then EnableAntiPush(Player.Character) end
@@ -1362,7 +1350,7 @@ BossToggleBtn.MouseButton1Click:Connect(function()
 		TweenService:Create(BossToggleKnob, TW, {Position=UDim2.new(0,3,0.5,-9), BackgroundColor3=Color3.fromRGB(200,200,220)}):Play()
 		TweenService:Create(BossToggleBg,   TW, {BackgroundColor3=C.OFF}):Play()
 		TweenService:Create(BossCardStroke, TW, {Color=C.BR}):Play()
-		BossSubtitle.Text       = "Desativado"
+		BossSubtitle.Text       = "OFF"
 		BossSubtitle.TextColor3 = C.TS
 		_BOSS_TARGET = nil; _CURRENT_TARGET_ROOT = nil; _CURRENT_TARGET_MODEL = nil
 		if not _FARM then DisableAntiPush(); _AUTO_ATTACK_ACTIVE = false end
@@ -1377,7 +1365,6 @@ task.spawn(function()
 	end
 end)
 
--- Atualiza canvas do scroll de tools
 task.spawn(function()
 	while task.wait(0.1) do
 		SkillsScroll.CanvasSize = UDim2.new(0, 0, 0, SkillsLayout.AbsoluteContentSize.Y + 10)
@@ -1390,7 +1377,7 @@ end)
 MB.MouseButton1Click:Connect(function()
 	_GUI_MINIMIZED = not _GUI_MINIMIZED
 	if _GUI_MINIMIZED then
-		if _MOB_DROP_OPEN then
+		if _MOB_DROP_OPEN  then
 			_MOB_DROP_OPEN = false
 			CloseSidePanel(MobDropdown)
 			SetExpandIcon(MobExpandBtn, false, C.TS)
@@ -1400,13 +1387,12 @@ MB.MouseButton1Click:Connect(function()
 			CloseSidePanel(BossDropdown)
 			SetExpandIcon(BossExpandBtn, false, C.TS)
 		end
-		TweenService:Create(MF, TW, {Size = UDim2.new(0, GUI_W, 0, HEADER_H)}):Play()
+		TweenService:Create(MF, TW, {Size = UDim2.new(0, 300, 0, HEADER_H)}):Play()
 		ContentContainer.Visible = false
 		TabContainer.Visible     = false
 		MB.Text = "\u{25A1}"
 	else
-		local targetH = (_CURRENT_PAGE == "AutoFarm") and GUI_H_FARM or GUI_H_SKILLS
-		TweenService:Create(MF, TW, {Size = UDim2.new(0, GUI_W, 0, targetH)}):Play()
+		TweenService:Create(MF, TW, {Size = UDim2.new(0, 300, 0, GUI_H)}):Play()
 		ContentContainer.Visible = true
 		TabContainer.Visible     = true
 		MB.Text = "_"
@@ -1424,4 +1410,4 @@ Player.CharacterAdded:Connect(function(char)
 	if newBp then HookBackpackEvents(newBp); UpdateSkillsList() end
 end)
 
-print("[AnxieeScripts V10.1] Layout Skills corrigido! Farm="..GUI_H_FARM.."px | Skills="..GUI_H_SKILLS.."px")
+print("[AnxieeScripts V10] Key Toggles Z/X/C/V/F adicionados! GUI_H=" .. GUI_H .. "px")
